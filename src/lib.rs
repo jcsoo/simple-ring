@@ -1,7 +1,5 @@
-#![allow(dead_code)]
 #![feature(const_fn)]
-//#![no_std]
-extern crate core;
+#![no_std]
 
 use core::cmp;
 use core::cell::Cell;
