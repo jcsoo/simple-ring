@@ -7,8 +7,8 @@ use core::cmp;
 use core::cell::Cell;
 
 macro_rules! ring_buf {
-    ($size:expr, $t:ty, $d:expr) => {                
-        RingBuf { reader: Cell::new(0), writer: Cell::new(0), length: $size, buffer: &mut [$d; $size] as *mut Array<$t>}
+    ($size:expr, $t:ident) => {                
+        RingBuf { reader: Cell::new(0), writer: Cell::new(0), length: $size, buffer: &mut [::core::$t::MIN; $size] as *mut Array<$t>}
     }
 }
 
@@ -105,6 +105,10 @@ macro_rules! impl_array_recursive {
             impl_array!($size, u16);
             impl_array!($size, u32);
             impl_array!($size, usize);
+            impl_array!($size, i8);
+            impl_array!($size, i16);
+            impl_array!($size, i32);
+            impl_array!($size, isize);
         )*
              
     }
@@ -132,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_enqueue_dequeue() {
-        let rbuf = ring_buf!(16, u8, 0u8);
+        let rbuf = ring_buf!(16, u8);
         
         for i in 0..16 {
             assert_eq!(rbuf.enqueue(i as u8), true);
@@ -146,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_enqueue_dequeue_u32() {
-        let rbuf = ring_buf!(16, u32, 0u32);
+        let rbuf = ring_buf!(16, u32);
         
         for i in 0..16 {
             assert_eq!(rbuf.enqueue(i as u32), true);
@@ -160,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_write_read() {
-        let rbuf = ring_buf!(16, u8, 0u8);
+        let rbuf = ring_buf!(16, u8);
 
         let src: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
         let mut dst = [0u8; 16];
@@ -185,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_driver() {
-        let rbuf = ring_buf!(16, u8, 0u8);
+        let rbuf = ring_buf!(16, u8);
         {
             let mut d = Driver { rbuf: &rbuf };
             d.run();
@@ -198,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_static_driver() {
-        static mut RBUF: RingBuf<u8> = ring_buf!(16, u8, 0u8);
+        static mut RBUF: RingBuf<u8> = ring_buf!(16, u8);
         static mut DRV: Option<Driver> = None;
         {            
             unsafe {
