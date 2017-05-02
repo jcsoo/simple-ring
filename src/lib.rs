@@ -67,11 +67,11 @@ impl<T: ByteArray> RingBuf<T> {
     }
 
     fn len(&self) -> usize {
-        self.reader.get().wrapping_sub(self.writer.get())
+        self.writer.get().wrapping_sub(self.reader.get())
     }
 
     fn rem(&self) -> usize {
-        self.cap() - self.len()
+        self.cap().wrapping_sub(self.len())
     }
 
     fn is_empty(&self) -> bool {
@@ -89,7 +89,7 @@ impl<T: ByteArray> RingBuf<T> {
 
     fn incr_writer(&self) {        
         assert!(!self.is_full(), "Attempted to increment full writer");
-        self.writer.set(self.writer.get().wrapping_add(1));
+        self.writer.set(self.writer.get().wrapping_add(1));     
     }
 
     fn phy(&self, index: usize) -> usize {
@@ -204,6 +204,27 @@ mod tests {
         for i in 0..16 {
             assert_eq!(src[i], dst[i]);
         }
+    }
+
+    #[test]
+    fn test_driver() {
+        pub struct Driver<T: ByteArray> {
+            writer: RingWriter<T>
+        }
+
+        impl<T: ByteArray> Driver<T> {
+            pub fn run(&mut self) {
+                self.writer.write(b"ABC");
+            }
+        }
+
+        let (mut reader, writer) = ring_buf!(16);
+        let mut d = Driver { writer: writer };
+        d.run();
+
+        let mut dst = [0u8; 16];
+        let n = reader.read(&mut dst);
+        assert_eq!(&dst[..n], b"ABC");
 
     }
 }
