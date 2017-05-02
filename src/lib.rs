@@ -207,4 +207,29 @@ mod tests {
         w: RingBufWriter<'a, u8>
     }
 
+    impl<'a> Driver<'a> {
+        pub fn run(&self) {
+            self.w.enqueue(123);
+        }
+    }
+
+    #[test]
+    fn test_driver() {
+        let (r, w) = static_ring_buf!(16, u8, 0);
+        let drv = Driver { w: w };
+        drv.run();
+        assert_eq!(r.dequeue(), Some(123));
+    }
+
+    #[test]
+    fn test_static_driver() {
+        let (r, w) = static_ring_buf!(16, u8, 0);        
+        static mut DRV: Option<Driver> = None;
+        unsafe {
+            DRV = Some(Driver { w: w});
+            DRV.as_ref().unwrap().run();
+        }
+        assert_eq!(r.dequeue(), Some(123));
+    }    
+
 }
