@@ -1,25 +1,53 @@
+#![allow(dead_code)]
 #![feature(const_fn)]
 #![no_std]
 
-use core::cmp;
 use core::cell::Cell;
+use core::cmp;
 
-macro_rules! ring_buf {
-    ($size:expr, $t:ident) => {                
-        RingBuf { reader: Cell::new(0), writer: Cell::new(0), length: $size, buffer: &mut [::core::$t::MIN; $size] as *mut Array<$t>}
+macro_rules! static_ring_buf {
+    ($size:expr, $ty:ty, $zero:expr) => {
+        {
+            static mut BUF: [$ty; $size] = [$zero; $size];
+            static mut RBUF: Option<RingBuf<$ty>> = None;
+            unsafe {
+                RBUF = Some(
+                    RingBuf {
+                        reader: Cell::new(0),
+                        writer: Cell::new(0),
+                        buffer: &mut BUF,
+                    }
+                );
+                RBUF.as_ref().unwrap().pair()
+            }
+        }
     }
 }
 
-pub struct RingBuf<T> {
+pub struct RingBuf<T: Copy> {
     reader: Cell<usize>,
     writer: Cell<usize>,
-    length: usize,
-    buffer: *mut Array<T>,
+    buffer: *mut [T],
 }
 
 impl<T: Copy> RingBuf<T> {
+    pub fn pair(&self) -> (RingBufReader<T>, RingBufWriter<T>) {
+        (
+            RingBufReader { rb: self},
+            RingBufWriter { rb: self}
+        )
+    }
+
+    fn as_ref(&self) -> &[T] {
+        unsafe { &*self.buffer }
+    }
+
+    fn as_mut(&self) -> &mut [T]{
+        unsafe { &mut *self.buffer }
+    }    
+
     fn cap(&self) -> usize {
-        self.length
+        self.as_ref().len()
     }
 
     fn len(&self) -> usize {
@@ -57,7 +85,7 @@ impl<T: Copy> RingBuf<T> {
             false
         } else {
             let writer = self.phy(self.writer.get());
-            unsafe { (&mut *self.buffer).set(writer, value); }
+            self.as_mut()[writer] = value;
             self.incr_writer();
             true
         }
@@ -68,7 +96,7 @@ impl<T: Copy> RingBuf<T> {
             None
         } else {
             let reader = self.phy(self.reader.get());
-            let value = unsafe { (&mut *self.buffer).get(reader) };
+            let value = self.as_ref()[reader];
             self.incr_reader();
             Some(value)
         }
@@ -88,44 +116,34 @@ impl<T: Copy> RingBuf<T> {
             buf[i] = self.dequeue().expect("Ring buffer is empty");
         }
         n
+    }    
+}
+
+pub struct RingBufReader<'a, T: 'a + Copy> {
+    rb: &'a RingBuf<T>,
+}
+
+impl<'a, T: Copy> RingBufReader<'a, T> {
+    pub fn dequeue(&self) -> Option<T> {
+        self.rb.dequeue()
+    }
+    pub fn read(&self, buf: &mut [T]) -> usize {
+        self.rb.read(buf)
     }
 }
 
-pub trait Array<T> {
-    fn get(&mut self, index: usize) -> T;
-    fn set(&mut self, index: usize, value: T);
+pub struct RingBufWriter<'a, T: 'a + Copy> {
+    rb: &'a RingBuf<T>,
 }
 
-macro_rules! impl_array_recursive {
-    ($($size:expr),*) => {
-        $(
-            impl_array!($size, u8);
-            impl_array!($size, u16);
-            impl_array!($size, u32);
-            impl_array!($size, usize);
-            impl_array!($size, i8);
-            impl_array!($size, i16);
-            impl_array!($size, i32);
-            impl_array!($size, isize);
-        )*
-             
+impl<'a, T: Copy> RingBufWriter<'a, T> {
+    pub fn enqueue(&self, value: T) -> bool {
+        self.rb.enqueue(value)
+    }
+    pub fn write(&self, buf: &[T]) -> usize {    
+        self.rb.write(buf)
     }
 }
-
-macro_rules! impl_array {
-    ($size:expr, $t:ty) => {
-        impl Array<$t> for [$t; $size] {
-            fn get(&mut self, index: usize) -> $t {
-                self[index]
-            }
-            fn set(&mut self, index: usize, value: $t) {
-                self[index] = value
-            }
-        }
-    }
-}
-
-impl_array_recursive!(1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 8192, 16384, 32768, 65536);
 
 
 #[cfg(test)]
@@ -133,87 +151,60 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_enqueue_dequeue() {
-        let rbuf = ring_buf!(16, u8);
-        
-        for i in 0..16 {
-            assert_eq!(rbuf.enqueue(i as u8), true);
-        }
-        assert_eq!(rbuf.enqueue(0), false);
-        for i in 0..16 {
-            assert_eq!(rbuf.dequeue(), Some(i as u8));
-        }
-        assert_eq!(rbuf.dequeue(), None);
+    fn test_static() {
+        let (r, w) = static_ring_buf!(16, u8, 0);
+        w.write(b"Hello, World");
+        let mut dst = [0u8; 64];
+        let n = r.read(&mut dst);
+        assert_eq!(&dst[..n], b"Hello, World");
     }
 
+
     #[test]
-    fn test_enqueue_dequeue_u32() {
-        let rbuf = ring_buf!(16, u32);
+    fn test_enqueue_dequeue() {
+        let (r, w) = static_ring_buf!(16, u8, 0);
         
         for i in 0..16 {
-            assert_eq!(rbuf.enqueue(i as u32), true);
+            assert_eq!(w.enqueue(i as u8), true);
         }
-        assert_eq!(rbuf.enqueue(0), false);
+        assert_eq!(w.enqueue(0), false);
         for i in 0..16 {
-            assert_eq!(rbuf.dequeue(), Some(i as u32));
+            assert_eq!(r.dequeue(), Some(i as u8));
         }
-        assert_eq!(rbuf.dequeue(), None);
-    }    
+        assert_eq!(r.dequeue(), None);
+    }
+
+     #[test]
+    fn test_enqueue_dequeue_u32() {
+        let (r, w) = static_ring_buf!(16, u32, 0);
+        
+        for i in 0..16 {
+            assert_eq!(w.enqueue(i as u32), true);
+        }
+        assert_eq!(w.enqueue(0), false);
+        for i in 0..16 {
+            assert_eq!(r.dequeue(), Some(i as u32));
+        }
+        assert_eq!(r.dequeue(), None);
+    }   
 
     #[test]
     fn test_write_read() {
-        let rbuf = ring_buf!(16, u8);
+        let (r, w) = static_ring_buf!(16, u8, 0);
 
         let src: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
         let mut dst = [0u8; 16];
 
-        rbuf.write(&src);
-        let n = rbuf.read(&mut dst);
+        w.write(&src);
+        let n = r.read(&mut dst);
         assert_eq!(n, 16);
         for i in 0..16 {
             assert_eq!(src[i], dst[i]);
         }
     }
 
-    struct Driver<'a> {
-        rbuf: &'a RingBuf<u8>,
+    pub struct Driver<'a> {
+        w: RingBufWriter<'a, u8>
     }
 
-    impl<'a> Driver<'a> {
-        pub fn run(&mut self) {
-            self.rbuf.write(b"ABC");
-        }
-    }
-
-    #[test]
-    fn test_driver() {
-        let rbuf = ring_buf!(16, u8);
-        {
-            let mut d = Driver { rbuf: &rbuf };
-            d.run();
-
-            let mut dst = [0u8; 16];
-            let n = rbuf.read(&mut dst);
-            assert_eq!(&dst[..n], b"ABC");
-        }
-    }
-
-    #[test]
-    fn test_static_driver() {
-        static mut RBUF: RingBuf<u8> = ring_buf!(16, u8);
-        static mut DRV: Option<Driver> = None;
-        {            
-            unsafe {
-                DRV = Some(Driver { rbuf: &RBUF });
-                &DRV.as_mut().unwrap().run();
-            }
-
-        }
-        unsafe {
-            let mut dst = [0u8; 16];
-            let n = RBUF.read(&mut dst);
-            assert_eq!(&dst[..n], b"ABC");
-        }
-
-    }
 }
