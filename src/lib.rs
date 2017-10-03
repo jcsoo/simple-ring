@@ -1,10 +1,9 @@
-#![allow(dead_code)]
-#![feature(const_fn)]
 #![no_std]
 
 use core::cell::Cell;
 use core::cmp;
 
+#[macro_export]
 macro_rules! static_ring_buf {
     ($size:expr, $ty:ty, $zero:expr) => {
         {
